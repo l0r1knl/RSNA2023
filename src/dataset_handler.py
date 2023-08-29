@@ -51,7 +51,7 @@ class AbdominalTraumaDataset(Dataset):
         if self.is_train:
             self.__set_multi_labels()
         else:
-            self.labels = torch.empty(self.patient_info.shape)
+            self.labels = torch.empty(self.patient_series.shape)
             self.classes = None
 
     def __get_images_dir(
