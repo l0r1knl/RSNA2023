@@ -30,6 +30,7 @@ class AbdominalTraumaDataset(Dataset):
         target_transform: Optional[transforms.Transform] = None,
         is_pseudo3D: bool = True,
         has_pseudo3D_img: bool = False,
+        stride: int = 1,
         device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     ) -> None:
 
@@ -41,6 +42,7 @@ class AbdominalTraumaDataset(Dataset):
         self.is_train = "any_injury" in self.patient_info.columns
         self.is_pseudo3D = is_pseudo3D
         self.has_pseudo3D_img = has_pseudo3D_img
+        self.stride = stride
 
         self.transform = transform.to(device) if transform else transform
         self.pre_transform = pre_transform.to(
@@ -61,48 +63,57 @@ class AbdominalTraumaDataset(Dataset):
     ) -> Path:
         return (self.img_root_dir / str(patient_id) / str(series_id))
 
+    def __get_image_paths(self, images_dir: Path) -> list[Path]:
+        return sorted(
+            for path in images_dir.glob(f"*{self.img_extension}")
+        )[::self.stride]
+    
     def __read_images(
         self,
-        images_dir: Path,
+        image_paths: list[Path],
     ) -> list[torch.Tensor]:
+        
         return [
             read_image(str(path)).to(self.device)
-            for path in sorted(images_dir.glob(f"*{self.img_extension}"))
+            for path in image_paths
         ]
 
     def __read_images_from_dicom(
         self,
-        images_dir: Path,
-        size: Optional[int] = 512
+        image_paths: list[Path],
+        size: Optional[int] = 512,
     ) -> list[torch.Tensor]:
 
         imgs = {}
-        for path in sorted(images_dir.glob(f"*{self.img_extension}")):
-            dicom = pydicom.dcmread(path)
+        for path in image_paths:
+            try:
+                dicom = pydicom.dcmread(path)
 
-            pos_z = dicom[(0x20, 0x32)].value[-1]
+                pos_z = dicom[(0x20, 0x32)].value[-1]
 
-            img = standardize_pixel_array(dicom)
-            img = (img - img.min()) / (img.max() - img.min() + 1e-6)
+                img = standardize_pixel_array(dicom)
+                img = (img - img.min()) / (img.max() - img.min() + 1e-6)
 
-            if dicom.PhotometricInterpretation == "MONOCHROME1":
-                img = 1 - img
+                if dicom.PhotometricInterpretation == "MONOCHROME1":
+                    img = 1 - img
 
-            img = (img * 255).astype(np.uint8)
-            imgs[pos_z] = cv2.resize(
-                img, (size, size)) if size is not None else img
+                img = (img * 255).astype(np.uint8)
+                imgs[pos_z] = cv2.resize(
+                    img, (size, size)) if size is not None else img
+
+            except Exception as e:
+                pass
 
         return [torch.from_numpy(imgs[k]).to(self.device) for k in sorted(imgs.keys())]
-
+    
     def __read_pseudo3D_image(
         self,
         images_dir: Path,
-        patient_id: int,
-        series_id: int
+        patient_id:int,
+        series_id:int
     ) -> torch.Tensor:
         image_path = (
-            images_dir / str(patient_id) /
-            (str(series_id) + self.img_extension)
+            images_dir / str(patient_id) / (str(series_id) + self.img_extension)
         )
         return read_image(str(image_path)).to(self.device)
 
@@ -115,7 +126,9 @@ class AbdominalTraumaDataset(Dataset):
         labels["kidney_injury"] = (
             labels["kidney_low"] + labels["kidney_high"] * 2
         )
-        labels["liver_injury"] = labels["liver_low"] + labels["liver_high"] * 2
+        labels["liver_injury"] = (
+            labels["liver_low"] + labels["liver_high"] * 2
+        )
         labels["spleen_injury"] = (
             labels["spleen_low"] + labels["spleen_high"] * 2
         )
@@ -147,6 +160,7 @@ class AbdominalTraumaDataset(Dataset):
                 self.img_root_dir, patient_id, series_id
             )
         else:
+            images_paths = self.__get_image_path(images_dir)
             if self.img_extension == ".dcm":
                 image = self.__read_images_from_dicom(images_dir)
             else:
