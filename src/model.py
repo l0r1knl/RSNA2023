@@ -164,12 +164,6 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                         self.save_model_state(
                             save_dir / f"E{epoch:03}.pt", device
                         )
-                    pbar.set_postfix(
-                        OrderedDict(
-                            Loss=epoch_losses[epoch][f"{phase}_average_loss"]
-                        )
-                    )
-                    pbar.close()
 
         if save_dir:
             self.load_model_state(save_dir / f"E{best_epoch:03}.pt", device)
@@ -191,7 +185,7 @@ class MultiAbdominalTraumaClassifier(nn.Module):
             weight = (criterions_weight[key] if criterions_weight else 1)
             losses[key] = criterions[key](
                 outputs[key].softmax(dim=1), labels[:, i].long())
-            loss += losses[key] *weight
+            loss += losses[key] * weight
 
         loss /= len(criterions)
 
