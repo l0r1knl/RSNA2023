@@ -89,6 +89,7 @@ class MultiAbdominalTraumaClassifier(nn.Module):
         optimizer: Optimizer,
         scheduler: _LRScheduler,
         num_epochs: int,
+        criterions_weight: Optional[dict[float]] = None,
         save_dir: Optional[Path] = None,
         device: torch.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -123,11 +124,11 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                         with torch.set_grad_enabled(phase == "train"):
                             outputs = self(inputs)
                             losses = self.calc_losses(
-                                criterions, outputs, labels
+                                criterions, outputs, labels, criterions_weight
                             )
                             # backward + optimize only if in training phase
                             if phase == "train":
-                                losses["total_loss"].backward()
+                                losses["average_loss"].backward()
                                 optimizer.step()
 
                         if running_loss is None:
@@ -140,10 +141,6 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                                 running_loss[label] += (
                                     loss.item() * inputs.size(0)
                                 )
-
-                        pbar.set_postfix(
-                            OrderedDict(Loss=losses["total_loss"].item())
-                        )
 
                     dataset_size = len(dataloaders[phase].dataset)
                     _epoch_loss = {
@@ -159,8 +156,8 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                     if scheduler and phase == "train":
                         scheduler.step()
 
-                    if phase == "valid" and epoch_losses[epoch][f"{phase}_total_loss"] <= best_loss:
-                        best_loss = epoch_losses[epoch][f"{phase}_total_loss"]
+                    if phase == "valid" and epoch_losses[epoch][f"{phase}_average_loss"] <= best_loss:
+                        best_loss = epoch_losses[epoch][f"{phase}_average_loss"]
                         best_epoch = epoch
 
                     if save_dir:
@@ -169,10 +166,11 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                         )
                     pbar.set_postfix(
                         OrderedDict(
-                            Loss=epoch_losses[epoch][f"{phase}_total_loss"]
+                            Loss=epoch_losses[epoch][f"{phase}_average_loss"]
                         )
                     )
-                    
+                    pbar.close()
+
         if save_dir:
             self.load_model_state(save_dir / f"E{best_epoch:03}.pt", device)
 
@@ -182,18 +180,22 @@ class MultiAbdominalTraumaClassifier(nn.Module):
         self,
         criterions: dict[_Loss],
         outputs: list[torch.Tensor],
-        labels: list[torch.Tensor]
+        labels: list[torch.Tensor],
+        criterions_weight: Optional[dict[float]] = None,
     ) -> dict[str:torch.Tensor]:
 
         loss = 0.0
         losses = dict()
 
         for i, key in enumerate(outputs):
+            weight = (criterions_weight[key] if criterions_weight else 1)
             losses[key] = criterions[key](
                 outputs[key].softmax(dim=1), labels[:, i].long())
-            loss += losses[key]
+            loss += losses[key] *weight
 
-        losses.update({f"total_loss": loss})
+        loss /= len(criterions)
+
+        losses.update({f"average_loss": loss})
 
         return losses
 
