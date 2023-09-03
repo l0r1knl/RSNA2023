@@ -63,16 +63,20 @@ class AbdominalTraumaDataset(Dataset):
     ) -> Path:
         return (self.img_root_dir / str(patient_id) / str(series_id))
 
-    def __get_image_paths(self, images_dir: Path) -> list[Path]:
+    def __get_image_paths(
+            self,
+            images_dir: Path
+    ) -> list[Path]:
+
         return sorted(
-            for path in images_dir.glob(f"*{self.img_extension}")
+            path for path in images_dir.glob(f"*{self.img_extension}")
         )[::self.stride]
-    
+
     def __read_images(
         self,
         image_paths: list[Path],
     ) -> list[torch.Tensor]:
-        
+
         return [
             read_image(str(path)).to(self.device)
             for path in image_paths
@@ -101,19 +105,20 @@ class AbdominalTraumaDataset(Dataset):
                 imgs[pos_z] = cv2.resize(
                     img, (size, size)) if size is not None else img
 
-            except Exception as e:
+            except Exception:
                 pass
 
         return [torch.from_numpy(imgs[k]).to(self.device) for k in sorted(imgs.keys())]
-    
+
     def __read_pseudo3D_image(
         self,
         images_dir: Path,
-        patient_id:int,
-        series_id:int
+        patient_id: int,
+        series_id: int
     ) -> torch.Tensor:
         image_path = (
-            images_dir / str(patient_id) / (str(series_id) + self.img_extension)
+            images_dir / str(patient_id) /
+            f"{str(series_id)}-{self.stride:02}{self.img_extension}"
         )
         return read_image(str(image_path)).to(self.device)
 
@@ -160,11 +165,11 @@ class AbdominalTraumaDataset(Dataset):
                 self.img_root_dir, patient_id, series_id
             )
         else:
-            images_paths = self.__get_image_path(images_dir)
+            images_paths = self.__get_image_paths(images_dir)
             if self.img_extension == ".dcm":
-                image = self.__read_images_from_dicom(images_dir)
+                image = self.__read_images_from_dicom(images_paths)
             else:
-                image = self.__read_images(images_dir)
+                image = self.__read_images(images_paths)
 
             if self.is_pseudo3D:
                 image = make_pseudo3D_CT_image(image, self.device)
