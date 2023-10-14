@@ -34,7 +34,11 @@ class MultiAbdominalTraumaClassifier(nn.Module):
     ) -> None:
         super().__init__()
 
-        num_ftrs = backbone.fc.in_features
+        backbone_lastlayer = list(backbone.children())[-1]
+        if type(backbone_lastlayer) is torch.nn.modules.container.Sequential:
+            backbone_lastlayer = list(backbone_lastlayer.children())[-1]
+        
+        num_ftrs = backbone_lastlayer.in_features
         self.backbone = nn.Sequential(*(list(backbone.children())[:-1]))
         self.flatten = nn.Flatten()
 
