@@ -37,10 +37,17 @@ class MultiAbdominalTraumaClassifier(nn.Module):
         backbone_lastlayer = list(backbone.children())[-1]
         if type(backbone_lastlayer) is torch.nn.modules.container.Sequential:
             backbone_lastlayer = list(backbone_lastlayer.children())[-1]
-        
+
         num_ftrs = backbone_lastlayer.in_features
+        
         self.backbone = nn.Sequential(*(list(backbone.children())[:-1]))
-        self.flatten = nn.Flatten()
+        
+        self.is_transformer = backbone._get_name() == "VisionTransformer"
+        if self.is_transformer:
+            self._process_input = backbone._process_input
+            self.class_token = backbone.class_token
+        else:
+            self.flatten = nn.Flatten()
 
         self.bowel_classifier = nn.Sequential(
             nn.Dropout(p=dropout_rate),
@@ -73,8 +80,11 @@ class MultiAbdominalTraumaClassifier(nn.Module):
         )
 
     def forward(self, x):
-        x = self.backbone(x)
-        x = self.flatten(x)
+        if self.is_transformer:
+            x = self._transformer_process(x)
+        else:
+            x = self.backbone(x)
+            x = self.flatten(x)
 
         return {
             "bowel_injury": self.bowel_classifier(x),
@@ -85,6 +95,17 @@ class MultiAbdominalTraumaClassifier(nn.Module):
             "any_injury": self.any_injury_classifier(x),
             "incomplete_organ": self.incomplete_classifier(x),
         }
+
+    def _transformer_process(self, x):
+
+        x = self._process_input(x)
+        n = x.shape[0]
+        batch_class_token = self.class_token.expand(n, -1, -1)
+        x = torch.cat([batch_class_token, x], dim=1)
+        x = self.backbone[1](x)
+        x = x[:, 0]
+
+        return x
 
     def fit(
         self,
@@ -158,7 +179,7 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                         epoch_losses[epoch].update(_epoch_loss)
 
                     if scheduler and phase == "train":
-                        scheduler.step()
+                        scheduler.step(epoch)
 
                     if phase == "valid" and epoch_losses[epoch][f"{phase}_average_loss"] <= best_loss:
                         best_loss = epoch_losses[epoch][f"{phase}_average_loss"]
