@@ -39,9 +39,9 @@ class MultiAbdominalTraumaClassifier(nn.Module):
             backbone_lastlayer = list(backbone_lastlayer.children())[-1]
 
         num_ftrs = backbone_lastlayer.in_features
-        
+
         self.backbone = nn.Sequential(*(list(backbone.children())[:-1]))
-        
+
         self.is_transformer = backbone._get_name() == "VisionTransformer"
         if self.is_transformer:
             self._process_input = backbone._process_input
@@ -133,14 +133,16 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                     self.eval()   # Set model to evaluate mode
 
                 running_loss = None
+                total = len(dataloaders[phase])
 
                 # Iterate over data.
-                with tqdm(dataloaders[phase]) as pbar:
+                with tqdm(total=total) as pbar:
                     pbar.set_description(
                         f'[Epoch: {epoch + 1}/{num_epochs}, Phase: {phase}]'
                     )
 
-                    for inputs, labels in pbar:
+                    for inputs, labels in dataloaders[phase]:
+                        pbar.update(1)
                         # zero the parameter gradients
                         optimizer.zero_grad()
 
@@ -166,6 +168,9 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                                 running_loss[label] += (
                                     loss.item() * inputs.size(0)
                                 )
+                        pbar.set_postfix(
+                            {'loss (in progress)': running_loss["average_loss"]}
+                        )
 
                     dataset_size = len(dataloaders[phase].dataset)
                     _epoch_loss = {
@@ -189,6 +194,10 @@ class MultiAbdominalTraumaClassifier(nn.Module):
                         self.save_model_state(
                             save_dir / f"E{epoch:03}.pt", device
                         )
+                    pbar.set_postfix(
+                        {'loss (final)': epoch_losses[epoch][f"{phase}_average_loss"]}
+                    )
+                    pbar.close()
 
         if save_dir:
             self.load_model_state(save_dir / f"E{best_epoch:03}.pt", device)
